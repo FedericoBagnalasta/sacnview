@@ -9,7 +9,8 @@ incluso: `9eac6e0` "#390 Correct MacOS Signing"). Dal più vecchio al più recen
 | `57bcff5` | CI: nome dell'installer Windows allineato a `install.nsi` (`sACNView_<version>.exe`). | — |
 | `f22ac21` | Un solo flusso di sync per (sync address, destinazione), condiviso da tutte le sorgenti, con CID dedicato `m_syncCid`. | [universe-synchronization.md](universe-synchronization.md) |
 | `e64e9de` | Bit Force_Synchronization: pulsante **Force Sync** nella finestra Transmit, modificabile anche durante la trasmissione; il bit esce solo per universi sincronizzati. | [universe-synchronization.md](universe-synchronization.md) |
-| *(questo commit)* | Cambio Per-Source ↔ Per-Address durante la trasmissione, con passaggio a Per-Source senza Stream_Terminated (valori 0xDD piatti per 3 s, poi chiusura silenziosa); priorità per indirizzo e priorità della sorgente modificabili durante la trasmissione. Correzioni: `stopSending()` su sorgente ferma terminava un'altra sorgente; primo pacchetto 0xDD a zero; copia di 512 byte in un buffer 0xDD più corto. | [priority-mode-runtime.md](priority-mode-runtime.md) |
+| `8b21d8c` | Cambio Per-Source ↔ Per-Address durante la trasmissione, con passaggio a Per-Source senza Stream_Terminated (valori 0xDD piatti per 3 s, poi chiusura silenziosa); priorità per indirizzo e priorità della sorgente modificabili durante la trasmissione. Correzioni: `stopSending()` su sorgente ferma terminava un'altra sorgente; primo pacchetto 0xDD a zero; copia di 512 byte in un buffer 0xDD più corto. | [priority-mode-runtime.md](priority-mode-runtime.md) |
+| *(questo commit)* | Aggiunto `CLAUDE.md` (struttura, regole, verifica e procedura per le modifiche future). | [../CLAUDE.md](../CLAUDE.md) |
 
 ## Stato attuale (riepilogo)
 
