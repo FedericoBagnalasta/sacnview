@@ -420,10 +420,15 @@ private:
     void DoDestruction(uint handle);
 
     // Universe Synchronization (E1.31-2018 section 11) senders.
-    // One per source CID, synchronization address and destination (multicast or unicast).
+    // A single stream per synchronization address and destination (multicast or unicast),
+    // shared by all the sources synchronized to that address: synchronization applies to
+    // universes, not to sources, so one packet per tick releases the whole group.
+    // All the streams use m_syncCid, a CID dedicated to synchronization, so that the stream
+    // identity never depends on which sources are currently transmitting.
     // Kept for the server lifetime so the sync sequence number never restarts.
-    typedef std::tuple<CID, quint16, QString> syncKey;
+    typedef std::pair<quint16, QString> syncKey; // (sync address, unicast destination or empty for multicast)
     std::map<syncKey, sACNSynchronizationTX *> m_syncSenders;
+    const CID m_syncCid;
     void sendSynchronization(const std::set<syncKey> & keys);
 
     // Mutex for write protection of members

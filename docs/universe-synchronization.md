@@ -33,17 +33,29 @@ A ogni ciclo:
 2. **Invio dati**: oltre agli universi normalmente in scadenza, vengono inviati anche gli altri
    universi dello stesso gruppo di sync (se rispettano l'intervallo minimo). Così un singolo
    pacchetto di sync applica un frame coerente su tutto il gruppo.
-3. **Passo 2**: solo dopo tutti i dati del ciclo viene inviato un pacchetto di sync per ogni
-   coppia (sorgente CID, indirizzo di sync) che ha trasmesso.
+3. **Passo 2**: solo dopo tutti i dati del ciclo viene inviato **un solo pacchetto di sync per
+   ogni indirizzo di sync** (e per ogni destinazione, vedi sotto) che ha trasmesso, qualunque sia
+   il numero di sorgenti sincronizzate su quell'indirizzo.
 
 Dettagli:
 - I pacchetti di sync escono dallo **stesso socket dei dati**, così l'ordine "dati poi sync"
   sul cavo è garantito.
 - Destinazione: in multicast il gruppo dell'universo di sync; se la sorgente trasmette in
   unicast, il sync va allo stesso indirizzo unicast.
-- Ogni sorgente (CID) invia i propri pacchetti di sync: è il comportamento sicuro anche per
-  ricevitori che accettano il sync solo dalla sorgente dei dati. Con più sorgenti sullo stesso
-  indirizzo si hanno più pacchetti di sync per ciclo, tutti dopo i dati.
+- **Un flusso di sync per indirizzo, condiviso da tutte le sorgenti.** La sincronizzazione
+  riguarda gli universi, non le sorgenti: il primo pacchetto di sync rilascia tutti i dati in
+  attesa sull'indirizzo, quindi altri pacchetti nello stesso ciclo sarebbero solo traffico in più
+  (con la Multi Universe ogni riga ha un CID diverso: N righe sullo stesso indirizzo producevano
+  N sync per ciclo).
+- La chiave del flusso è (indirizzo di sync, destinazione): un flusso per il gruppo multicast,
+  più uno per ogni destinazione unicast distinta usata dalle sorgenti del gruppo.
+- **CID dedicato al sync**: tutti i flussi usano un CID proprio del server di trasmissione
+  (`CStreamServer::m_syncCid`, generato all'avvio), diverso da quelli delle sorgenti dati. Così
+  l'identità del flusso e il numero di sequenza non dipendono da quali sorgenti sono attive:
+  fermare o avviare una sorgente non cambia il CID del sync né fa ripartire la sequenza.
+  I ricevitori conformi applicano il sync in base all'indirizzo, non al CID (anche il ricevitore
+  di sACNView si comporta così); ricevitori che accettano il sync solo dal CID della sorgente dati
+  non sono compatibili con questa scelta.
 - I sender di sync (`sACNSynchronizationTX`) restano attivi per tutta la vita del server, così
   il numero di sequenza non riparte da zero.
 - Il Synchronization Address è inserito solo nei pacchetti E1.31 ratified con start code 0x00;
@@ -61,7 +73,7 @@ Dettagli:
 
 | File | Modifica |
 |---|---|
-| `src/sacn/sacnsender.h/.cpp` | campo `sync_address` per universo, gruppi di sync nel `TickLoop`, `sendSynchronization()`, fix byte order |
+| `src/sacn/sacnsender.h/.cpp` | campo `sync_address` per universo, gruppi di sync nel `TickLoop`, `sendSynchronization()` con un flusso per (indirizzo, destinazione) e CID dedicato `m_syncCid`, fix byte order |
 | `src/sacn/sacnsynchronization.h/.cpp` | `sACNSynchronizationTX` accetta socket e destinazione esterni; lunghezza 49 byte |
 | `src/ui/transmitwindow.*`, `ui/transmitwindow.ui` | riga Sync Universe |
 | `src/ui/multiuniverse.*`, `ui/multiuniverse.ui` | colonna Sync Universe |
@@ -91,7 +103,23 @@ universo 3 senza sync):
 - portando a `Off` il sync dell'universo 2 durante la trasmissione, l'indirizzo nei suoi pacchetti
   passa a 0 e il suo sync non viene più inviato.
 
+### Test del flusso unico per indirizzo
+
+Test a livello di pacchetti (unicast su loopback, 6 sorgenti con CID diversi come nella Multi
+Universe: universi 1, 2, 3 con sync 100 verso 127.0.0.1, universo 4 con sync 200, universo 5 senza
+sync, universo 6 con sync 100 verso 127.0.0.2):
+- un solo pacchetto di sync 100 per ciclo verso 127.0.0.1, dopo i dati di tutti gli universi 1-3
+  (con il codice precedente erano 3 per ciclo);
+- flussi separati per sync 100 verso 127.0.0.2 e per sync 200;
+- tutti i pacchetti di sync hanno lo stesso CID, diverso da quelli delle sorgenti dati;
+- sequenza incrementata di uno per pacchetto;
+- fermando la sorgente dell'universo 1 il flusso continua con lo stesso CID e la sequenza
+  non riparte;
+- portando a `Off` il sync dell'universo 2, il suo indirizzo passa a 0 e il sync 100 continua per
+  l'universo 3.
+
 ## Limitazioni note
 
 - Le impostazioni di sync non vengono salvate tra un avvio e l'altro.
 - Il bit Force_Synchronization non è esposto nell'interfaccia.
+- Il CID del sync cambia a ogni avvio di sACNView e non è visibile nell'interfaccia.

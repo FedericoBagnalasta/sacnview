@@ -393,6 +393,7 @@ void CStreamServer::shutdown()
 
 CStreamServer::CStreamServer()
     : m_thread_stop(false)
+    , m_syncCid(CID::CreateCid())
 {
     m_sendsock = new sACNTxSocket(Preferences::Instance().networkInterface());
 
@@ -550,12 +551,13 @@ void CStreamServer::TickLoop()
                     it->num_terminates++;
                 }
 
-                // Queue a sync packet for this source/sync address.
+                // Queue a sync packet for this sync address, whatever the source.
+                // The set collapses all the sources of the group into one packet per destination.
                 // Unicast data -> unicast sync to the same receiver; multicast -> sync universe multicast group
                 if (it->sync_address != NOT_SYNCHRONIZED_VALUE)
                 {
                     const QString syncDest = it->sendaddr.isMulticast() ? QString() : it->sendaddr.toString();
-                    pendingSync.insert(syncKey(it->cid, it->sync_address, syncDest));
+                    pendingSync.insert(syncKey(it->sync_address, syncDest));
                 }
 
                 //Finally, set the timing/dirtiness for the next interval
@@ -832,8 +834,9 @@ void CStreamServer::setSynchronizationAddress(uint handle, quint16 address)
     }
 }
 
-// Send one Universe Synchronization packet per key, through the data socket so that
-// on the wire they follow the data packets of the same tick.
+// Send one Universe Synchronization packet per key (sync address, destination), through the
+// data socket so that on the wire they follow the data packets of the same tick.
+// Every packet carries the server synchronization CID, not the CID of a data source.
 // Called from TickLoop with m_writeMutex held.
 void CStreamServer::sendSynchronization(const std::set<syncKey> & keys)
 {
@@ -842,10 +845,10 @@ void CStreamServer::sendSynchronization(const std::set<syncKey> & keys)
         auto it = m_syncSenders.find(key);
         if (it == m_syncSenders.end())
         {
-            const QString & dest = std::get<2>(key);
+            const QString & dest = key.second;
             auto * syncSender = new sACNSynchronizationTX(
-                std::get<0>(key),
-                std::get<1>(key),
+                m_syncCid,
+                key.first,
                 m_sendsock,
                 dest.isEmpty() ? QHostAddress() : QHostAddress(dest));
             it = m_syncSenders.emplace(key, syncSender).first;
