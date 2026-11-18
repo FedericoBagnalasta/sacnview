@@ -25,6 +25,7 @@
 #include "tock.h"
 #include <QMutex>
 #include <Qt>
+#include <array>
 #include <map>
 #include <set>
 #include <tuple>
@@ -37,6 +38,11 @@ class sACNSentUniverse : public QObject
 {
     Q_OBJECT
 public:
+
+    // How long the flat 0xDD values are sent after switching to PER_SOURCE while sending
+    // (see setPriorityMode): longer than the E1.31 network data loss timeout used by
+    // receivers for the 0xDD stream
+    static constexpr int PAP_HANDOVER_MS = E131_NETWORK_DATA_LOSS_TIMEOUT + 500;
 
     // Constructor
     sACNSentUniverse(int universe);
@@ -84,9 +90,15 @@ public slots:
 
     /**
      * @brief setPriorityMode - sets the priority mode of sACN to transmit, per-universe or per-address
+     * Can be changed while sending:
+     * - to PER_ADDRESS: the per-address priority (0xDD) stream starts immediately;
+     * - to PER_SOURCE: the 0xDD values become all equal to the per-source priority (receivers
+     *   behave as per-source at once), are kept for PAP_HANDOVER_MS, then the 0xDD stream stops
+     *   silently (no Stream_Terminated, which would put the whole source in data loss).
      * @param mode - the mode to use
      */
     void setPriorityMode(PriorityMode mode);
+    PriorityMode priorityMode() const { return m_priorityMode; }
     /**
      * @brief setPerChannelPriorities - sets the per-channel priority data for the source
      *
@@ -230,6 +242,8 @@ signals:
 
 private slots:
     void doTimeout();
+    // End of the PER_ADDRESS -> PER_SOURCE handover: stop the 0xDD stream silently
+    void endPapHandover();
 
 private:
 
@@ -254,8 +268,18 @@ private:
     CID m_cid;
     // Priority mode
     PriorityMode m_priorityMode;
-    // Per-channel priorities
+    // Per-channel priorities: send buffer of the 0xDD universe (nullptr when not active)
     quint8 * m_perChannelPriorities;
+    // Requested per-address priorities, kept also when the 0xDD stream is not active
+    std::array<quint8, MAX_DMX_ADDRESS> m_papValues;
+    // True while the 0xDD universe exists in CStreamServer (m_priorityHandle valid)
+    bool m_priorityActive;
+    // Running during the PER_ADDRESS -> PER_SOURCE handover (flat 0xDD values)
+    QTimer * m_papHandoverTimer;
+    // Preview (blind) option of the current transmission, reused for a 0xDD stream created later
+    bool m_preview;
+    void createPriorityUniverse();
+    void writePriorityBuffer();
     // Unicast
     QHostAddress m_unicastAddress;
     // Protocol Version
@@ -345,6 +369,11 @@ public:
     void setUniverseName(uint handle, const char * name);
     void setUniversePriority(uint handle, quint8 priority);
     void setSynchronizationAddress(uint handle, quint16 address);
+    // Removes a universe immediately, without sending Stream_Terminated packets.
+    // Used to stop a per-address priority (0xDD) stream while the DMX stream of the same
+    // source continues: Stream_Terminated would make receivers drop the whole source.
+    // As with DestroyUniverse, the pslots buffer is invalid after this call.
+    void RemoveUniverse(uint handle);
     // Sets the Force_Synchronization option bit (E1.31-2018 6.2.6) of the universe.
     // The bit is actually sent only while the universe is synchronized (see applyForceSync).
     void setForceSynchronization(uint handle, bool force);

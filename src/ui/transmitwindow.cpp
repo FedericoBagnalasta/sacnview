@@ -24,6 +24,7 @@
 #include "sacn/streamingacn.h"
 #include <QButtonGroup>
 #include <QMessageBox>
+#include <QSet>
 #include <QToolButton>
 
 const char * FADERLABELFORMAT = "<b>%1</b><br>%2";
@@ -384,13 +385,24 @@ void transmitwindow::on_sbFadersStart_valueChanged(int address)
 
 void transmitwindow::setUniverseOptsEnabled(bool enabled)
 {
-    ui->frSourceOpts->setEnabled(enabled);
+    // The priority controls stay editable while transmitting (priority mode, per-address
+    // priorities, per-source priority). Disabling the whole frame would disable them too,
+    // so the other direct children of the frame are disabled one by one.
+    const QSet<QWidget *> liveEditable
+        = {ui->label_4, ui->cbPriorityMode, ui->btnEditPerChan, ui->label_3, ui->sbPriority};
+    const auto children = ui->frSourceOpts->findChildren<QWidget *>(Qt::FindDirectChildrenOnly);
+    for (auto * w : children)
+    {
+        if (!liveEditable.contains(w)) w->setEnabled(enabled);
+    }
     ui->cbBlind->setEnabled(enabled ? ui->rbRatified->isChecked() : false);
 
     if (enabled)
     {
         ui->btnStart->setText(tr("Start"));
         on_cbPriorityMode_currentIndexChanged(ui->cbPriorityMode->currentIndex());
+        // Re-enabling the children one by one loses their own conditions: restore them
+        updateSyncControls();
     }
     else
     {
@@ -468,6 +480,10 @@ void transmitwindow::on_btnStart_pressed()
         // Force_Synchronization bit (sent only while synchronized)
         m_sender->setForceSync(ui->btnForceSync->isChecked());
 
+        // Per-address priorities known before the 0xDD stream starts, so that its first
+        // packets already carry them
+        m_sender->setPerChannelPriorities(m_perAddressPriorities.data());
+
         m_sender->startSending(ui->cbBlind->isChecked());
 
         setUniverseOptsEnabled(false);
@@ -522,7 +538,30 @@ void transmitwindow::onConfigurePerChanPrioDlgFinished(int result)
     {
         memcpy(m_perAddressPriorities.data(), m_perChannelDialog->data(), m_slotCount);
         updatePerChanPriorityButton();
+        // The button is also usable while transmitting: send the new values now
+        applyPerAddressPriorities();
     }
+}
+
+void transmitwindow::applyPerAddressPriorities()
+{
+    if (!m_sender) return;
+
+    m_sender->setPerChannelPriorities(m_perAddressPriorities.data());
+    // Channel check and fade range may send only part of the priorities (when their PAP
+    // option is checked; otherwise these return without changes)
+    switch (ui->tabWidget->currentIndex())
+    {
+        case tabChannelCheck: updateChanCheckPap(ui->lcdNumber->intValue() - 1, ui->sbGrouping->value()); break;
+        case tabEffects: updateFadeRangePap(); break;
+        default: break;
+    }
+}
+
+void transmitwindow::on_sbPriority_valueChanged(int value)
+{
+    // Per-source priority can be changed while transmitting
+    if (m_sender && m_sender->isSending()) m_sender->setPerSourcePriority(static_cast<quint8>(value));
 }
 
 void transmitwindow::on_cbPriorityMode_currentIndexChanged(int index)
@@ -542,6 +581,16 @@ void transmitwindow::on_cbPriorityMode_currentIndexChanged(int index)
         ui->btnEditPerChan->setEnabled(false);
         ui->cbCcPap->setEnabled(false);
         ui->cbFadeRangePap->setEnabled(false);
+    }
+
+    // Priority mode can be changed while transmitting
+    if (m_sender && m_sender->isSending())
+    {
+        const auto mode = index == static_cast<int>(PriorityMode::PER_ADDRESS) ? PriorityMode::PER_ADDRESS
+                                                                              : PriorityMode::PER_SOURCE;
+        // Values first, so that a 0xDD stream created by setPriorityMode starts with them
+        if (mode == PriorityMode::PER_ADDRESS) applyPerAddressPriorities();
+        m_sender->setPriorityMode(mode);
     }
 }
 
@@ -920,8 +969,10 @@ void transmitwindow::updateSyncControls()
 {
     // Universe Synchronization only exists in ratified E1.31
     const bool ratified = ui->rbRatified->isChecked();
-    ui->cbSync->setEnabled(ratified);
-    ui->sbSyncUniverse->setEnabled(ratified && ui->cbSync->isChecked());
+    // Sync address and enable are set before Start, not while transmitting
+    const bool editable = !(m_sender && m_sender->isSending());
+    ui->cbSync->setEnabled(ratified && editable);
+    ui->sbSyncUniverse->setEnabled(ratified && editable && ui->cbSync->isChecked());
     // Force_Synchronization is meaningful only for a synchronized source.
     // The button lives outside the source options frame, so it stays usable while transmitting.
     ui->btnForceSync->setEnabled(ratified && ui->cbSync->isChecked());

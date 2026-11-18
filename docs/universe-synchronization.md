@@ -170,11 +170,7 @@ disattivato con sync spento, attivo con sync abilitato, utilizzabile durante la 
 - Il Force Sync è disponibile solo nella finestra Transmit, non nella Multi Universe.
 - Il CID del sync cambia a ogni avvio di sACNView e non è visibile nell'interfaccia.
 
-## Storico dei commit (branch `feature/universe-sync-tx`)
+## Storico dei commit
 
-| Commit | Contenuto |
-|---|---|
-| `6d6f5d7` | Prima implementazione della trasmissione sincronizzata: Synchronization Address nei pacchetti dati, gruppi di sync nel `TickLoop`, pacchetti di sync dopo i dati, UI Transmit e Multi Universe, correzioni byte order e lunghezza 49 byte. Un flusso di sync per ogni sorgente (CID). |
-| `57bcff5` | CI: nome dell'installer Windows allineato a `install.nsi`. |
-| `f22ac21` | Un solo flusso di sync per (sync address, destinazione), condiviso da tutte le sorgenti, con CID dedicato `m_syncCid`. |
-| *(questo commit)* | Bit Force_Synchronization: pulsante **Force Sync** nella finestra Transmit, modificabile anche durante la trasmissione; il bit esce solo per universi sincronizzati. |
+Lo storico dei commit del branch, con il contenuto di ciascuno, è in
+[`storico-commit.md`](storico-commit.md).

@@ -53,13 +53,18 @@ sACNSentUniverse::sACNSentUniverse(int universe)
     , m_universe(universe)
     , m_priorityMode(PriorityMode::PER_SOURCE)
     , m_perChannelPriorities(nullptr)
+    , m_priorityActive(false)
+    , m_papHandoverTimer(Q_NULLPTR)
+    , m_preview(false)
     , m_version(sACNProtocolRelease)
     , m_checkTimeoutTimer(Q_NULLPTR)
     , m_synchronization(NOT_SYNCHRONIZED_VALUE)
     , m_forceSync(false)
     , m_minSendFreq(E131_DATA_KEEP_ALIVE_FREQUENCY)
     , m_maxSendFreq(E1_11::MAX_REFRESH_RATE_HZ)
-{}
+{
+    m_papValues.fill(m_priority);
+}
 
 sACNSentUniverse::~sACNSentUniverse()
 {
@@ -82,6 +87,7 @@ void sACNSentUniverse::startSending(bool preview)
     if (m_cid.isNull()) m_cid = CID::CreateCid();
 
     if (preview) options += PREVIEW_DATA_OPTION;
+    m_preview = preview;
 
     m_maxSendFreq = std::clamp(
         m_maxSendFreq,
@@ -114,25 +120,7 @@ void sACNSentUniverse::startSending(bool preview)
     streamServer->SetUniverseDirty(m_handle);
 
     // Per-Address (0xdd) server
-    if (m_priorityMode == PriorityMode::PER_ADDRESS)
-    {
-        streamServer->CreateUniverse(
-            m_cid,
-            qPrintable(m_name),
-            m_priority,
-            NOT_SYNCHRONIZED_VALUE,
-            options,
-            STARTCODE_PRIORITY,
-            m_universe,
-            m_slotCount,
-            m_perChannelPriorities,
-            m_priorityHandle,
-            E1_11::MIN_REFRESH_RATE_HZ,
-            m_maxSendFreq,
-            unicastAddress,
-            m_version);
-        streamServer->SetUniverseDirty(m_priorityHandle);
-    }
+    if (m_priorityMode == PriorityMode::PER_ADDRESS) createPriorityUniverse();
 
     m_isSending = true;
 
@@ -149,14 +137,22 @@ void sACNSentUniverse::startSending(bool preview)
 
 void sACNSentUniverse::stopSending()
 {
+    // Not sending: m_handle may now belong to another source (handles are reused), don't touch it
+    if (!m_isSending) return;
+
+    if (m_papHandoverTimer) m_papHandoverTimer->stop();
+
     CStreamServer::getInstance()->DestroyUniverse(m_handle);
     m_handle = 0;
     m_isSending = false;
 
-    if (m_priorityMode == PriorityMode::PER_ADDRESS)
+    // The 0xDD stream exists independently of the current mode (it may be in the handover)
+    if (m_priorityActive)
     {
         CStreamServer::getInstance()->DestroyUniverse(m_priorityHandle);
         m_priorityHandle = 0;
+        m_priorityActive = false;
+        m_perChannelPriorities = nullptr;
     }
 }
 
@@ -263,16 +259,98 @@ void sACNSentUniverse::setName(const QString & name)
 
 void sACNSentUniverse::setPriorityMode(PriorityMode mode)
 {
+    if (m_priorityMode == mode) return;
     m_priorityMode = mode;
+    if (!m_isSending) return; // applied by the next startSending()
+
+    if (mode == PriorityMode::PER_ADDRESS)
+    {
+        // Back to per-address during the handover: reuse the 0xDD stream with the requested values
+        if (m_papHandoverTimer) m_papHandoverTimer->stop();
+        if (m_priorityActive)
+            writePriorityBuffer();
+        else
+            createPriorityUniverse();
+    }
+    else if (m_priorityActive)
+    {
+        // Per-address -> per-source handover: flat 0xDD values first, silent stop later
+        if (!m_papHandoverTimer)
+        {
+            m_papHandoverTimer = new QTimer(this);
+            m_papHandoverTimer->setSingleShot(true);
+            connect(m_papHandoverTimer, &QTimer::timeout, this, &sACNSentUniverse::endPapHandover);
+        }
+        m_papHandoverTimer->start(PAP_HANDOVER_MS);
+        writePriorityBuffer();
+    }
+}
+
+void sACNSentUniverse::endPapHandover()
+{
+    if (!m_isSending || !m_priorityActive || m_priorityMode != PriorityMode::PER_SOURCE) return;
+
+    // No Stream_Terminated: receivers keep the (flat) 0xDD values until their data loss
+    // timeout, then use the per-source priority, which has the same value
+    CStreamServer::getInstance()->RemoveUniverse(m_priorityHandle);
+    m_priorityHandle = 0;
+    m_priorityActive = false;
+    m_perChannelPriorities = nullptr;
+}
+
+void sACNSentUniverse::createPriorityUniverse()
+{
+    if (m_priorityActive) return;
+
+    const quint8 options = m_preview ? PREVIEW_DATA_OPTION : NO_OPTIONS_VALUE;
+    CIPAddr unicastAddress;
+    if (!m_unicastAddress.isNull()) unicastAddress = CIPAddr(m_unicastAddress);
+
+    m_priorityActive = CStreamServer::getInstance()->CreateUniverse(
+        m_cid,
+        qPrintable(m_name),
+        m_priority,
+        NOT_SYNCHRONIZED_VALUE,
+        options,
+        STARTCODE_PRIORITY,
+        m_universe,
+        m_slotCount,
+        m_perChannelPriorities,
+        m_priorityHandle,
+        E1_11::MIN_REFRESH_RATE_HZ,
+        m_maxSendFreq,
+        unicastAddress,
+        m_version);
+
+    // Fill the buffer before the first packet goes out (it would otherwise carry all zeros,
+    // i.e. "do not use this source", for one packet)
+    if (m_priorityActive) writePriorityBuffer();
+}
+
+void sACNSentUniverse::writePriorityBuffer()
+{
+    if (!m_priorityActive || !m_perChannelPriorities) return;
+
+    if (m_papHandoverTimer && m_papHandoverTimer->isActive())
+    {
+        // Handover to per-source: every address at the per-source priority.
+        // 0 in 0xDD means "do not use this source for this address", so never go below 1.
+        memset(m_perChannelPriorities, std::max<quint8>(1, m_priority), m_slotCount);
+    }
+    else
+    {
+        memcpy(m_perChannelPriorities, m_papValues.data(), m_slotCount);
+    }
+    CStreamServer::getInstance()->SetUniverseDirty(m_priorityHandle);
 }
 
 void sACNSentUniverse::setPerChannelPriorities(quint8 * priorities)
 {
-    if (m_perChannelPriorities != nullptr && isSending() && m_priorityMode == PriorityMode::PER_ADDRESS)
-    {
-        memcpy(m_perChannelPriorities, priorities, MAX_DMX_ADDRESS);
-        CStreamServer::getInstance()->SetUniverseDirty(m_priorityHandle);
-    }
+    // Always kept, so that a 0xDD stream created later starts with these values
+    memcpy(m_papValues.data(), priorities, MAX_DMX_ADDRESS);
+
+    // Sent only in per-address mode (during the handover the flat values stay)
+    if (isSending() && m_priorityMode == PriorityMode::PER_ADDRESS) writePriorityBuffer();
 }
 
 void sACNSentUniverse::setPerSourcePriority(quint8 priority)
@@ -281,6 +359,13 @@ void sACNSentUniverse::setPerSourcePriority(quint8 priority)
     if (m_isSending)
     {
         CStreamServer::getInstance()->setUniversePriority(m_handle, priority);
+        CStreamServer::getInstance()->SetUniverseDirty(m_handle); // send the new value now
+        if (m_priorityActive)
+        {
+            CStreamServer::getInstance()->setUniversePriority(m_priorityHandle, priority);
+            // During the handover the flat 0xDD values follow the per-source priority
+            if (m_priorityMode == PriorityMode::PER_SOURCE) writePriorityBuffer();
+        }
     }
 }
 
@@ -792,6 +877,13 @@ void CStreamServer::DestroyUniverse(uint handle)
             SetStreamTerminated(m_multiverse[handle].psend, true);
         }
     }
+}
+
+// Remove a universe immediately, without Stream_Terminated packets (see header)
+void CStreamServer::RemoveUniverse(uint handle)
+{
+    QMutexLocker locker(&m_writeMutex);
+    DoDestruction(handle);
 }
 
 //Perform the logical destruction and cleanup of a universe and its related

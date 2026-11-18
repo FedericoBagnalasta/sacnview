@@ -92,6 +92,7 @@ private slots:
 
     void on_cbSync_toggled(bool checked);
     void on_btnForceSync_toggled(bool checked);
+    void on_sbPriority_valueChanged(int value);
 
     void onConfigurePerChanPrioDlgFinished(int result);
 
@@ -107,6 +108,7 @@ private:
 
     void setUniverseOptsEnabled(bool enabled);
     void updateSyncControls();
+    void applyPerAddressPriorities();
     void updateTitle();
     void setLevel(int address, int value);
     void updatePerChanPriorityButton();
