@@ -144,6 +144,18 @@ public slots:
     int synchronization() { return m_synchronization; }
 
     /**
+     * @brief setForceSync - set the E1.31 Force_Synchronization option bit (options bit 5).
+     * It tells receivers what to do when synchronization is lost (E1.31-2018 6.2.6):
+     * false (0) = keep waiting for sync packets before updating, true (1) = revert to
+     * unsynchronized operation and process the next data packets immediately.
+     * Only sent while the universe is synchronized (ratified E1.31, DMX start code);
+     * can be changed while sending.
+     * @param force - Force_Synchronization bit value
+     */
+    void setForceSync(bool force);
+    bool forceSync() const { return m_forceSync; }
+
+    /**
      * @brief setCID - set the CID of this sender.
      * If active this will stop and restart the source
      * @param cid - new CID.
@@ -190,6 +202,11 @@ signals:
      * @brief synchronizationChange is emitted when the source changes Synchronization address
      */
     void synchronizationChange();
+
+    /**
+     * @brief forceSyncChange is emitted when the Force_Synchronization option changes
+     */
+    void forceSyncChange();
 
     /**
      * @brief cidChange is emitted when the source changes CID
@@ -247,6 +264,8 @@ private:
     QTimer * m_checkTimeoutTimer;
     // Synchronization Address
     quint16 m_synchronization;
+    // Force_Synchronization option bit
+    bool m_forceSync;
     // Secure password
     QString m_password;
     // Minimum and maximum send frequencies
@@ -326,6 +345,9 @@ public:
     void setUniverseName(uint handle, const char * name);
     void setUniversePriority(uint handle, quint8 priority);
     void setSynchronizationAddress(uint handle, quint16 address);
+    // Sets the Force_Synchronization option bit (E1.31-2018 6.2.6) of the universe.
+    // The bit is actually sent only while the universe is synchronized (see applyForceSync).
+    void setForceSynchronization(uint handle, bool force);
     void setSecurePassword(uint handle, const QString & password);
 
     // Set the minimum and maximum send frequency (FPS)
@@ -396,6 +418,7 @@ private:
         CID cid; // The CID
         PathwaySecure::password_t password; // Pathway Secure Protocol Password
         quint16 sync_address; // E1.31 Synchronization Address, NOT_SYNCHRONIZED_VALUE if unsynchronized
+        bool force_sync; // Requested Force_Synchronization option bit
 
         //and the constructor
         universe()
@@ -409,6 +432,7 @@ private:
             , cid()
             , password("")
             , sync_address(NOT_SYNCHRONIZED_VALUE)
+            , force_sync(false)
         {}
     };
 
@@ -418,6 +442,11 @@ private:
     //Perform the logical destruction and cleanup of a universe
     //and its related objects.
     void DoDestruction(uint handle);
+
+    // Writes the Force_Synchronization bit in the packet buffer: set only if requested and the
+    // universe is synchronized (ratified E1.31, DMX start code, sync address != 0), cleared otherwise.
+    // Called with m_writeMutex held.
+    void applyForceSync(universe & u);
 
     // Universe Synchronization (E1.31-2018 section 11) senders.
     // A single stream per synchronization address and destination (multicast or unicast),

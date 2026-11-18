@@ -602,6 +602,28 @@ border-radius: 4px;
         </widget>
        </item>
        <item>
+        <widget class="QPushButton" name="btnForceSync">
+         <property name="enabled">
+          <bool>false</bool>
+         </property>
+         <property name="focusPolicy">
+          <enum>Qt::FocusPolicy::NoFocus</enum>
+         </property>
+         <property name="toolTip">
+          <string>E1.31 Force_Synchronization option bit, sent while Universe Synchronization is enabled.
+Off (0): if sync packets stop, receivers keep waiting and do not update until synchronization resumes.
+On (1): if sync packets stop, receivers revert to unsynchronized operation and apply new data immediately.
+Can be changed while transmitting.</string>
+         </property>
+         <property name="text">
+          <string>Force Sync: Off</string>
+         </property>
+         <property name="checkable">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
         <widget class="QPushButton" name="btnStart">
          <property name="focusPolicy">
           <enum>Qt::FocusPolicy::NoFocus</enum>

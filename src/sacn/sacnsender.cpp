@@ -56,6 +56,7 @@ sACNSentUniverse::sACNSentUniverse(int universe)
     , m_version(sACNProtocolRelease)
     , m_checkTimeoutTimer(Q_NULLPTR)
     , m_synchronization(NOT_SYNCHRONIZED_VALUE)
+    , m_forceSync(false)
     , m_minSendFreq(E131_DATA_KEEP_ALIVE_FREQUENCY)
     , m_maxSendFreq(E1_11::MAX_REFRESH_RATE_HZ)
 {}
@@ -92,12 +93,14 @@ void sACNSentUniverse::startSending(bool preview)
     if (!m_unicastAddress.isNull()) unicastAddress = CIPAddr(m_unicastAddress);
 
     // DMX Data (0x00) server
+    // Force_Synchronization only applies to the synchronized DMX data (CStreamServer drops it otherwise)
+    const quint8 dmxOptions = m_forceSync ? (options | FORCE_SYCHRONIZATION_OPTION) : options;
     streamServer->CreateUniverse(
         m_cid,
         qPrintable(m_name),
         m_priority,
         m_synchronization,
-        options,
+        dmxOptions,
         STARTCODE_DMX,
         m_universe,
         m_slotCount,
@@ -314,6 +317,18 @@ void sACNSentUniverse::setSynchronization(quint16 address)
     }
 
     emit synchronizationChange();
+}
+
+void sACNSentUniverse::setForceSync(bool force)
+{
+    if (m_forceSync == force) return;
+    m_forceSync = force;
+    if (m_isSending)
+    {
+        CStreamServer::getInstance()->setForceSynchronization(m_handle, m_forceSync);
+    }
+
+    emit forceSyncChange();
 }
 
 void sACNSentUniverse::setCID(CID cid)
@@ -659,6 +674,10 @@ bool CStreamServer::CreateUniverse(
     if (version != sACNProtocolRelease) synchronization = NOT_SYNCHRONIZED_VALUE;
     m_multiverse[handle].sync_address = synchronization;
 
+    // Force_Synchronization: remember the request, the bit is written by applyForceSync() below
+    m_multiverse[handle].force_sync = (options & FORCE_SYCHRONIZATION_OPTION) != 0;
+    options &= ~FORCE_SYCHRONIZATION_OPTION;
+
     CIPAddr addr;
     GetUniverseAddress(universe, addr);
 
@@ -715,6 +734,7 @@ bool CStreamServer::CreateUniverse(
 
     m_multiverse[handle].psend = pbuf;
     m_multiverse[handle].sendsize = sendsize;
+    applyForceSync(m_multiverse[handle]);
     if (version == sACNProtocolDraft)
         pslots = pbuf + DRAFT_STREAM_HEADER_SIZE;
     else
@@ -830,8 +850,30 @@ void CStreamServer::setSynchronizationAddress(uint handle, quint16 address)
         // 16 bit, network byte order (previously only one byte was written)
         PackBUint16(m_multiverse[handle].psend + SYNC_ADDR, address);
         m_multiverse[handle].sync_address = address;
+        // Force_Synchronization is meaningful only while synchronized
+        applyForceSync(m_multiverse[handle]);
         m_multiverse[handle].isdirty = true;
     }
+}
+
+void CStreamServer::setForceSynchronization(uint handle, bool force)
+{
+    QMutexLocker locker(&m_writeMutex);
+    if (handle < m_multiverse.size() && m_multiverse[handle].psend)
+    {
+        m_multiverse[handle].force_sync = force;
+        applyForceSync(m_multiverse[handle]);
+        m_multiverse[handle].isdirty = true;
+    }
+}
+
+void CStreamServer::applyForceSync(universe & u)
+{
+    // Ratified E1.31 only: Draft has a different header layout, Pathway Secure has no sync
+    if (!u.psend || u.version != sACNProtocolRelease) return;
+    SetForceSync(
+        u.psend,
+        u.force_sync && u.start_code == STARTCODE_DMX && u.sync_address != NOT_SYNCHRONIZED_VALUE);
 }
 
 // Send one Universe Synchronization packet per key (sync address, destination), through the

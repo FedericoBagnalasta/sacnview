@@ -15,6 +15,9 @@ Prima di questa modifica la sincronizzazione era supportata solo in ricezione.
 - È disponibile solo con protocollo **E1.31 (ratified)**; con Draft e Pathway Secure è disattivata.
 - Come le altre opzioni della sorgente, si imposta prima di premere **Start**.
 - Per sincronizzare più finestre, imposta in tutte lo stesso Sync Universe.
+- Pulsante **Force Sync: Off / On** (sopra Start): imposta il bit Force_Synchronization della
+  sorgente. È attivo solo con il sync abilitato e, a differenza delle altre opzioni, si può
+  cambiare **anche durante la trasmissione**: il nuovo valore esce nei pacchetti dati successivi.
 
 **Finestra Multi Universe**
 - Nuova colonna **Sync Universe** per ogni riga: `Off` = non sincronizzato, altrimenti
@@ -62,6 +65,35 @@ Dettagli:
   per Draft, Pathway Secure e i dati di priorità per indirizzo (0xDD) resta 0, altrimenti i
   ricevitori attenderebbero un sync che non arriva.
 
+### Force Synchronization
+
+Bit 5 (0x20) del campo Options dei pacchetti dati (E1.31-2018 §6.2.6). Indica ai ricevitori
+cosa fare quando la sincronizzazione si perde, cioè quando smettono di arrivare i pacchetti di sync:
+- **0 (Off, default)**: i ricevitori che stavano lavorando sincronizzati non aggiornano le uscite
+  con i nuovi pacchetti finché la sincronizzazione non riprende;
+- **1 (On)**: i ricevitori tornano al funzionamento non sincronizzato e applicano subito i dati
+  successivi, senza attendere un nuovo pacchetto di sync.
+
+(Definizione riportata dal testo dello standard come ricordato durante lo sviluppo: verificarla
+sul documento ESTA se serve un riferimento formale.)
+
+Implementazione:
+- `sACNSentUniverse::setForceSync(bool)` / `forceSync()`, segnale `forceSyncChange()`. All'avvio
+  il bit è passato nelle options della `CreateUniverse` del solo universo DMX (0x00); durante la
+  trasmissione chiama `CStreamServer::setForceSynchronization()`.
+- `CStreamServer` memorizza la richiesta per universo (`universe::force_sync`) e scrive il bit con
+  `applyForceSync()`, che lo imposta solo se l'universo è sincronizzato: E1.31 ratified, start code
+  0x00, Synchronization Address diverso da 0. In tutti gli altri casi il bit resta a 0: sorgenti
+  senza sync, Draft, Pathway Secure, pacchetti di priorità per indirizzo (0xDD).
+- `applyForceSync()` viene richiamata anche da `setSynchronizationAddress()`: portando il sync a
+  `Off` durante la trasmissione il bit si azzera, riattivandolo torna al valore richiesto.
+- Ogni modifica marca l'universo come dirty, quindi il nuovo valore esce al ciclo successivo.
+- Interfaccia (`ui/transmitwindow.ui`, `src/ui/transmitwindow.*`): pulsante checkable
+  `btnForceSync` posto fuori dal riquadro `frSourceOpts`, che durante la trasmissione viene
+  disattivato. Abilitazione in `updateSyncControls()` (ratified + sync abilitato), slot
+  `on_btnForceSync_toggled()`.
+- La finestra Multi Universe non ha ancora un comando per questo bit.
+
 ## Correzioni a codice esistente
 
 - `CStreamServer::setSynchronizationAddress()` scriveva un solo byte nel campo a 16 bit
@@ -75,7 +107,8 @@ Dettagli:
 |---|---|
 | `src/sacn/sacnsender.h/.cpp` | campo `sync_address` per universo, gruppi di sync nel `TickLoop`, `sendSynchronization()` con un flusso per (indirizzo, destinazione) e CID dedicato `m_syncCid`, fix byte order |
 | `src/sacn/sacnsynchronization.h/.cpp` | `sACNSynchronizationTX` accetta socket e destinazione esterni; lunghezza 49 byte |
-| `src/ui/transmitwindow.*`, `ui/transmitwindow.ui` | riga Sync Universe |
+| `src/sacn/sacnsender.h/.cpp` (Force Sync) | `setForceSync()`, `setForceSynchronization()`, `applyForceSync()`, campo `force_sync` |
+| `src/ui/transmitwindow.*`, `ui/transmitwindow.ui` | riga Sync Universe, pulsante Force Sync |
 | `src/ui/multiuniverse.*`, `ui/multiuniverse.ui` | colonna Sync Universe |
 
 ## Predisposizione per la funzione B ("sync master")
@@ -118,8 +151,30 @@ sync, universo 6 con sync 100 verso 127.0.0.2):
 - portando a `Off` il sync dell'universo 2, il suo indirizzo passa a 0 e il sync 100 continua per
   l'universo 3.
 
+### Test del bit Force Synchronization
+
+Stesso test a livello di pacchetti, con due sorgenti aggiuntive (universo 10 con sync 300, Force
+Sync attivo dall'avvio e priorità per indirizzo; universo 11 con Force Sync ma senza sync):
+- universo 10: bit 0x20 impostato nei pacchetti DMX, assente nei pacchetti 0xDD;
+- universo 11: bit assente (nessun sync);
+- Force Sync spento e riacceso durante la trasmissione: il bit segue il comando;
+- sync portato a `Off` durante la trasmissione: bit azzerato; sync riattivato: bit di nuovo presente;
+- un'altra sorgente sincronizzata senza Force Sync: bit assente.
+
+Interfaccia verificata con il solo form generato da `uic` (non l'applicazione completa): pulsante
+disattivato con sync spento, attivo con sync abilitato, utilizzabile durante la trasmissione.
+
 ## Limitazioni note
 
 - Le impostazioni di sync non vengono salvate tra un avvio e l'altro.
-- Il bit Force_Synchronization non è esposto nell'interfaccia.
+- Il Force Sync è disponibile solo nella finestra Transmit, non nella Multi Universe.
 - Il CID del sync cambia a ogni avvio di sACNView e non è visibile nell'interfaccia.
+
+## Storico dei commit (branch `feature/universe-sync-tx`)
+
+| Commit | Contenuto |
+|---|---|
+| `6d6f5d7` | Prima implementazione della trasmissione sincronizzata: Synchronization Address nei pacchetti dati, gruppi di sync nel `TickLoop`, pacchetti di sync dopo i dati, UI Transmit e Multi Universe, correzioni byte order e lunghezza 49 byte. Un flusso di sync per ogni sorgente (CID). |
+| `57bcff5` | CI: nome dell'installer Windows allineato a `install.nsi`. |
+| `f22ac21` | Un solo flusso di sync per (sync address, destinazione), condiviso da tutte le sorgenti, con CID dedicato `m_syncCid`. |
+| *(questo commit)* | Bit Force_Synchronization: pulsante **Force Sync** nella finestra Transmit, modificabile anche durante la trasmissione; il bit esce solo per universi sincronizzati. |

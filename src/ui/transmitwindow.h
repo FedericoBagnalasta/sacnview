@@ -91,6 +91,7 @@ private slots:
     void on_sbMaxFPS_editingFinished();
 
     void on_cbSync_toggled(bool checked);
+    void on_btnForceSync_toggled(bool checked);
 
     void onConfigurePerChanPrioDlgFinished(int result);
 

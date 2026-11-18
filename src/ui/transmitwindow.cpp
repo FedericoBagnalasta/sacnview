@@ -465,6 +465,8 @@ void transmitwindow::on_btnStart_pressed()
         m_sender->setSynchronization(
             ui->cbSync->isChecked() && ui->rbRatified->isChecked() ? ui->sbSyncUniverse->value()
                                                                    : NOT_SYNCHRONIZED_VALUE);
+        // Force_Synchronization bit (sent only while synchronized)
+        m_sender->setForceSync(ui->btnForceSync->isChecked());
 
         m_sender->startSending(ui->cbBlind->isChecked());
 
@@ -907,12 +909,22 @@ void transmitwindow::on_cbSync_toggled(bool)
     updateSyncControls();
 }
 
+void transmitwindow::on_btnForceSync_toggled(bool checked)
+{
+    ui->btnForceSync->setText(checked ? tr("Force Sync: On") : tr("Force Sync: Off"));
+    // Also while transmitting: the bit changes in the next data packets
+    if (m_sender) m_sender->setForceSync(checked);
+}
+
 void transmitwindow::updateSyncControls()
 {
     // Universe Synchronization only exists in ratified E1.31
     const bool ratified = ui->rbRatified->isChecked();
     ui->cbSync->setEnabled(ratified);
     ui->sbSyncUniverse->setEnabled(ratified && ui->cbSync->isChecked());
+    // Force_Synchronization is meaningful only for a synchronized source.
+    // The button lives outside the source options frame, so it stays usable while transmitting.
+    ui->btnForceSync->setEnabled(ratified && ui->cbSync->isChecked());
 }
 
 void transmitwindow::sourceTimeout()
