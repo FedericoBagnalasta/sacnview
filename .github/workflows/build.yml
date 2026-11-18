@@ -43,7 +43,7 @@ jobs:
               Invoke-WebRequest -Uri "https://nsis.sourceforge.io/mediawiki/images/e/e0/NSIS_Simple_Firewall_Plugin_Unicode_1.21.zip" -OutFile "NSIS_Simple_Firewall_Plugin_Unicode.zip"
               7z e NSIS_Simple_Firewall_Plugin_Unicode.zip -o"C:\Program Files (x86)\NSIS\Plugins\x86-unicode"
             artifact: |
-              ./install/win64/sACNView64*.exe
+              ./install/win64/sACNView*.exe
               ./out/build/windows-x64-release-installer/sACNView.pdb
             configure_preset_name: "windows-x64-release-installer"
             build_preset_name: "windows-x64-release-installer"
