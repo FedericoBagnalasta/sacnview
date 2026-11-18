@@ -5,15 +5,30 @@
 #include "sacnlistener.h"
 #include "sacnsender.h"
 
-sACNSynchronizationTX::sACNSynchronizationTX(CID cid, tsyncAddress syncAddress)
-    : QObject(), m_cid(cid), m_syncAddress(syncAddress)
+sACNSynchronizationTX::sACNSynchronizationTX(
+    CID cid,
+    tsyncAddress syncAddress,
+    sACNTxSocket * socket,
+    const QHostAddress & destination)
+    : QObject(), m_sendSock(socket), m_cid(cid), m_syncAddress(syncAddress), m_destination(destination)
 {
     // Create base packet
     createSynchronizationPacket();
 
-    // Socket
-    m_sendSock = new sACNTxSocket(Preferences::Instance().networkInterface(), this);
-    m_sendSock->bind();
+    // Default destination: multicast address of the synchronization universe
+    if (m_destination.isNull())
+    {
+        CIPAddr addr;
+        GetUniverseAddress(m_syncAddress, addr);
+        m_destination = addr.ToQHostAddress();
+    }
+
+    // Socket: create (and own, via parent) a dedicated one if none supplied
+    if (!m_sendSock)
+    {
+        m_sendSock = new sACNTxSocket(Preferences::Instance().networkInterface(), this);
+        m_sendSock->bind();
+    }
 }
 
 sACNSynchronizationTX::~sACNSynchronizationTX() {}
@@ -56,9 +71,7 @@ void sACNSynchronizationTX::sendSynchronizationPacket()
     PackBUint8((quint8 *)m_pbuf.data() + SYNC_SEQ_NUM_ADDR, ++m_sequence);
 
     // Send packet
-    CIPAddr addr;
-    GetUniverseAddress(m_syncAddress, addr);
-    auto result = m_sendSock->writeDatagram(m_pbuf, addr.ToQHostAddress(), STREAM_IP_PORT);
+    auto result = m_sendSock->writeDatagram(m_pbuf, m_destination, STREAM_IP_PORT);
     if (result != m_pbuf.size())
     {
         qDebug() << "Error sending datagram : " << m_sendSock->errorString();

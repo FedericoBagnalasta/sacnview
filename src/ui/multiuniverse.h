@@ -56,6 +56,7 @@ private slots:
     void controlSliderMoved(int value);
     void controlComboChanged(int value);
     void priorityChanged(int value);
+    void syncChanged(int value);
     void senderTimedout(int index);
 
 private:
@@ -76,6 +77,7 @@ private:
         COL_ENDADDR,
         COL_EFFECT,
         COL_PRIORITY,
+        COL_SYNC,
         COL_CONTROL
     };
     QSignalMapper * m_timeoutMapper;

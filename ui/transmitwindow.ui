@@ -455,6 +455,55 @@ border-radius: 4px;
               </item>
              </layout>
             </item>
+            <item row="7" column="0">
+             <widget class="QLabel" name="lblSync">
+              <property name="toolTip">
+               <string>E1.31 Universe Synchronization: receivers apply the data only when a sync packet is received on this universe</string>
+              </property>
+              <property name="text">
+               <string>Sync Universe:</string>
+              </property>
+             </widget>
+            </item>
+            <item row="7" column="1">
+             <layout class="QHBoxLayout" name="hlSync">
+              <item>
+               <widget class="QCheckBox" name="cbSync">
+                <property name="focusPolicy">
+                 <enum>Qt::FocusPolicy::NoFocus</enum>
+                </property>
+                <property name="toolTip">
+                 <string>Enable E1.31 Universe Synchronization (ratified E1.31 only)</string>
+                </property>
+                <property name="text">
+                 <string>Enable</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QSpinBox" name="sbSyncUniverse">
+                <property name="enabled">
+                 <bool>false</bool>
+                </property>
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="focusPolicy">
+                 <enum>Qt::FocusPolicy::ClickFocus</enum>
+                </property>
+                <property name="toolTip">
+                 <string>Universe on which synchronization packets are sent</string>
+                </property>
+                <property name="alignment">
+                 <set>Qt::AlignmentFlag::AlignCenter</set>
+                </property>
+               </widget>
+              </item>
+             </layout>
+            </item>
            </layout>
           </item>
           <item>

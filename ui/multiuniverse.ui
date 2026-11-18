@@ -72,6 +72,11 @@
      </column>
      <column>
       <property name="text">
+       <string>Sync Universe</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
        <string>Control</string>
       </property>
      </column>

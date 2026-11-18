@@ -10,7 +10,8 @@
 #include <QObject>
 #include <QThread>
 
-#define E131_UNIVERSE_SYNCHRONIZATION_SIZE_MIN 48
+// Root layer (38) + sync framing layer (flags/length 2, vector 4, sequence 1, sync address 2, reserved 2) = 49
+#define E131_UNIVERSE_SYNCHRONIZATION_SIZE_MIN 49
 #define E131_UNIVERSE_SYNCHRONIZATION_SIZE_MAX E131_UNIVERSE_SYNCHRONIZATION_SIZE_MIN
 
 typedef quint16 tsyncAddress;
@@ -20,10 +21,25 @@ class sACNSynchronizationTX : public QObject
     Q_OBJECT
 public:
 
-    explicit sACNSynchronizationTX(CID cid, tsyncAddress syncAddress);
+    /**
+     * @brief sACNSynchronizationTX - builds and sends E1.31 Universe Synchronization packets
+     * for one source (CID) on one synchronization address.
+     * @param cid - CID of the source sending the packets
+     * @param syncAddress - synchronization address (universe), 1-63999
+     * @param socket - socket to send with. If nullptr a dedicated socket is created and owned
+     * by this object (standalone use, e.g. a future sync-only "sync master" source).
+     * CStreamServer passes its own socket so sync packets follow the data packets in order.
+     * @param destination - destination address. If null the multicast address of syncAddress is used.
+     */
+    explicit sACNSynchronizationTX(
+        CID cid,
+        tsyncAddress syncAddress,
+        sACNTxSocket * socket = nullptr,
+        const QHostAddress & destination = QHostAddress());
     ~sACNSynchronizationTX();
 
     void sendSynchronizationPacket();
+    tsyncAddress syncAddress() const { return m_syncAddress; }
 
 signals:
 
@@ -43,6 +59,7 @@ private:
 
     CID m_cid;
     tsyncAddress m_syncAddress;
+    QHostAddress m_destination;
     quint8 m_sequence = 0;
 };
 

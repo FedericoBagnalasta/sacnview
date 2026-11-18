@@ -22,6 +22,7 @@
 #include "CID.h"
 #include "ipaddr.h"
 #include "securesacn.h"
+#include "defpack.h"
 #include "streamcommon.h"
 #include "tock.h"
 
@@ -32,6 +33,7 @@
 #include <QUuid>
 
 #include "preferences.h"
+#include "sacnsynchronization.h"
 
 using namespace std::chrono_literals;
 #if defined(Q_OS_UNIX)
@@ -304,6 +306,7 @@ void sACNSentUniverse::setUniverse(int universe)
 
 void sACNSentUniverse::setSynchronization(quint16 address)
 {
+    if (m_synchronization == address) return;
     m_synchronization = address;
     if (m_isSending)
     {
@@ -419,6 +422,10 @@ CStreamServer::~CStreamServer()
     m_thread_stop = true;
     m_thread->quit();
     m_thread->wait();
+
+    for (auto & syncSender : m_syncSenders)
+        delete syncSender.second;
+    m_syncSenders.clear();
 }
 
 //Returns a pointer to the storage location for the universe, adding if
@@ -480,6 +487,20 @@ void CStreamServer::TickLoop()
 
         QMutexLocker locker(&m_writeMutex);
 
+        // Universe Synchronization (E1.31-2018 section 11), pass 1:
+        // collect the sync addresses with at least one universe due to send in this tick.
+        // All the other ready universes sharing that address are sent in the same tick,
+        // so that a single sync packet makes receivers apply a coherent frame.
+        std::set<quint16> firingSyncAddresses;
+        for (const auto & u : m_multiverse)
+        {
+            if (u.psend && u.sync_address != NOT_SYNCHRONIZED_VALUE && u.min_interval.Expired()
+                && (u.isdirty || u.num_suppress_remaining || u.send_interval.Expired()))
+                firingSyncAddresses.insert(u.sync_address);
+        }
+        // Sync packets to send after all the data of this tick
+        std::set<syncKey> pendingSync;
+
         for (auto it = m_multiverse.begin(); it != m_multiverse.end(); ++it)
         {
             //Too soon to send?
@@ -493,8 +514,12 @@ void CStreamServer::TickLoop()
                 DoDestruction(it->handle);
             }
 
-            //If valid, either a dirty, still about to supress rate, or send_interval will cause a send
-            if (it->psend && (it->isdirty || it->num_suppress_remaining || it->send_interval.Expired()))
+            // Another universe of the same sync group is sending in this tick
+            const bool syncForced = it->sync_address != NOT_SYNCHRONIZED_VALUE
+                && firingSyncAddresses.count(it->sync_address);
+
+            //If valid, either a dirty, still about to supress rate, send_interval or sync group will cause a send
+            if (it->psend && (it->isdirty || it->num_suppress_remaining || it->send_interval.Expired() || syncForced))
             {
                 // E1.31:2016 6.6.2 (clause 1) logic
                 if (it->isdirty && it->start_code == STARTCODE_DMX)
@@ -525,12 +550,23 @@ void CStreamServer::TickLoop()
                     it->num_terminates++;
                 }
 
+                // Queue a sync packet for this source/sync address.
+                // Unicast data -> unicast sync to the same receiver; multicast -> sync universe multicast group
+                if (it->sync_address != NOT_SYNCHRONIZED_VALUE)
+                {
+                    const QString syncDest = it->sendaddr.isMulticast() ? QString() : it->sendaddr.toString();
+                    pendingSync.insert(syncKey(it->cid, it->sync_address, syncDest));
+                }
+
                 //Finally, set the timing/dirtiness for the next interval
                 it->isdirty = false;
                 it->send_interval.Reset();
                 it->min_interval.Reset();
             }
         }
+
+        // Pass 2: sync packets go out only after every data packet of the tick
+        sendSynchronization(pendingSync);
     } // Loop
 
     qDebug() << "sACNSender" << QThread::currentThreadId() << ": Stopping";
@@ -615,6 +651,11 @@ bool CStreamServer::CreateUniverse(
     setSendFrequency(handle, minimum_send_rate, maximum_send_rate);
     m_multiverse[handle].version = version;
     m_multiverse[handle].cid = source_cid;
+
+    // Universe Synchronization is only supported by ratified E1.31 (not Draft, not Pathway Secure).
+    // Elsewhere the address is forced to 0, otherwise receivers would wait for sync packets never sent.
+    if (version != sACNProtocolRelease) synchronization = NOT_SYNCHRONIZED_VALUE;
+    m_multiverse[handle].sync_address = synchronization;
 
     CIPAddr addr;
     GetUniverseAddress(universe, addr);
@@ -780,9 +821,36 @@ void CStreamServer::setUniversePriority(uint handle, quint8 priority)
 
 void CStreamServer::setSynchronizationAddress(uint handle, quint16 address)
 {
-    if (m_multiverse[handle].psend && !(m_multiverse[handle].version == sACNProtocolDraft))
+    QMutexLocker locker(&m_writeMutex);
+    if (handle < m_multiverse.size() && m_multiverse[handle].psend
+        && m_multiverse[handle].version == sACNProtocolRelease)
     {
-        m_multiverse[handle].psend[SYNC_ADDR] = address;
+        // 16 bit, network byte order (previously only one byte was written)
+        PackBUint16(m_multiverse[handle].psend + SYNC_ADDR, address);
+        m_multiverse[handle].sync_address = address;
+        m_multiverse[handle].isdirty = true;
+    }
+}
+
+// Send one Universe Synchronization packet per key, through the data socket so that
+// on the wire they follow the data packets of the same tick.
+// Called from TickLoop with m_writeMutex held.
+void CStreamServer::sendSynchronization(const std::set<syncKey> & keys)
+{
+    for (const auto & key : keys)
+    {
+        auto it = m_syncSenders.find(key);
+        if (it == m_syncSenders.end())
+        {
+            const QString & dest = std::get<2>(key);
+            auto * syncSender = new sACNSynchronizationTX(
+                std::get<0>(key),
+                std::get<1>(key),
+                m_sendsock,
+                dest.isEmpty() ? QHostAddress() : QHostAddress(dest));
+            it = m_syncSenders.emplace(key, syncSender).first;
+        }
+        it->second->sendSynchronizationPacket();
     }
 }
 

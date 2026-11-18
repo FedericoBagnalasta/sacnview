@@ -158,6 +158,19 @@ void MultiUniverse::addSource(
     m_widgetToFxEngine[sb] = fxEngine;
     m_widgetToSender[sb] = sender.data();
 
+    // E1.31 Universe Synchronization address, 0 = not synchronized
+    sb = new QSpinBox(this);
+    sb->setMinimum(NOT_SYNCHRONIZED_VALUE);
+    sb->setMaximum(MAX_SACN_UNIVERSE);
+    sb->setSpecialValueText(tr("Off"));
+    sb->setValue(sender->synchronization());
+    sb->setToolTip(tr("Universe on which synchronization packets are sent (Off = not synchronized)"));
+    ui->tableWidget->setCellWidget(row, COL_SYNC, sb);
+    m_widgetToFxEngine[sb] = fxEngine;
+    m_widgetToSender[sb] = sender.data();
+    connect(sb, QOverload<int>::of(&QSpinBox::valueChanged), this, &MultiUniverse::syncChanged);
+    connect(sb, &QObject::destroyed, this, &MultiUniverse::removeWidgetFromIndex);
+
     QComboBox * cb = new QComboBox(this);
     cb->addItems(sACNEffectEngine::FxModeDescriptions());
     cb->setCurrentIndex((int)mode);
@@ -232,6 +245,16 @@ void MultiUniverse::priorityChanged(int value)
     {
         sACNSentUniverse * u = m_widgetToSender.value(w);
         u->setPerSourcePriority(value);
+    }
+}
+
+void MultiUniverse::syncChanged(int value)
+{
+    QWidget * w = dynamic_cast<QWidget *>(sender());
+    if (m_widgetToSender.contains(w))
+    {
+        sACNSentUniverse * u = m_widgetToSender.value(w);
+        u->setSynchronization(static_cast<quint16>(value));
     }
 }
 

@@ -26,9 +26,12 @@
 #include <QMutex>
 #include <Qt>
 #include <map>
+#include <set>
+#include <tuple>
 #include <vector>
 
 class QTimer;
+class sACNSynchronizationTX;
 
 class sACNSentUniverse : public QObject
 {
@@ -392,6 +395,7 @@ private:
         StreamingACNProtocolVersion version; //Draft or released sACN
         CID cid; // The CID
         PathwaySecure::password_t password; // Pathway Secure Protocol Password
+        quint16 sync_address; // E1.31 Synchronization Address, NOT_SYNCHRONIZED_VALUE if unsynchronized
 
         //and the constructor
         universe()
@@ -404,6 +408,7 @@ private:
             , version(sACNProtocolRelease)
             , cid()
             , password("")
+            , sync_address(NOT_SYNCHRONIZED_VALUE)
         {}
     };
 
@@ -413,6 +418,13 @@ private:
     //Perform the logical destruction and cleanup of a universe
     //and its related objects.
     void DoDestruction(uint handle);
+
+    // Universe Synchronization (E1.31-2018 section 11) senders.
+    // One per source CID, synchronization address and destination (multicast or unicast).
+    // Kept for the server lifetime so the sync sequence number never restarts.
+    typedef std::tuple<CID, quint16, QString> syncKey;
+    std::map<syncKey, sACNSynchronizationTX *> m_syncSenders;
+    void sendSynchronization(const std::set<syncKey> & keys);
 
     // Mutex for write protection of members
     QMutex m_writeMutex;

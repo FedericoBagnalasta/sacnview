@@ -90,6 +90,8 @@ private slots:
     void on_sbMinFPS_editingFinished();
     void on_sbMaxFPS_editingFinished();
 
+    void on_cbSync_toggled(bool checked);
+
     void onConfigurePerChanPrioDlgFinished(int result);
 
 private:
@@ -103,6 +105,7 @@ private:
     };
 
     void setUniverseOptsEnabled(bool enabled);
+    void updateSyncControls();
     void updateTitle();
     void setLevel(int address, int value);
     void updatePerChanPriorityButton();

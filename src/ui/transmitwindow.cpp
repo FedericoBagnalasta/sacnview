@@ -49,6 +49,12 @@ transmitwindow::transmitwindow(int universe, QWidget * parent)
     ui->sbPriority->setValue(DEFAULT_SACN_PRIORITY);
     ui->sbPriority->setWrapping(true);
 
+    ui->sbSyncUniverse->setMinimum(MIN_SACN_UNIVERSE);
+    ui->sbSyncUniverse->setMaximum(MAX_SACN_UNIVERSE);
+    ui->sbSyncUniverse->setValue(universe);
+    ui->sbSyncUniverse->setWrapping(true);
+    updateSyncControls();
+
     ui->sbSlotCount->setMaximum(MAX_DMX_ADDRESS);
     ui->sbSlotCount->setMinimum(MIN_DMX_ADDRESS);
     m_slotCount = MAX_DMX_ADDRESS;
@@ -454,6 +460,11 @@ void transmitwindow::on_btnStart_pressed()
         }
         using namespace std::chrono_literals;
         m_sender->setSendFrequency(ui->sbMinFPS->value(), ui->sbMaxFPS->value());
+
+        // Universe Synchronization (ratified E1.31 only)
+        m_sender->setSynchronization(
+            ui->cbSync->isChecked() && ui->rbRatified->isChecked() ? ui->sbSyncUniverse->value()
+                                                                   : NOT_SYNCHRONIZED_VALUE);
 
         m_sender->startSending(ui->cbBlind->isChecked());
 
@@ -882,11 +893,26 @@ void transmitwindow::on_rbDraft_clicked()
 {
     ui->cbBlind->setEnabled(false);
     ui->cbBlind->setChecked(false);
+    updateSyncControls();
 }
 
 void transmitwindow::on_rbRatified_clicked()
 {
     ui->cbBlind->setEnabled(true);
+    updateSyncControls();
+}
+
+void transmitwindow::on_cbSync_toggled(bool)
+{
+    updateSyncControls();
+}
+
+void transmitwindow::updateSyncControls()
+{
+    // Universe Synchronization only exists in ratified E1.31
+    const bool ratified = ui->rbRatified->isChecked();
+    ui->cbSync->setEnabled(ratified);
+    ui->sbSyncUniverse->setEnabled(ratified && ui->cbSync->isChecked());
 }
 
 void transmitwindow::sourceTimeout()
@@ -962,6 +988,7 @@ void transmitwindow::setLevelList(QList<QPair<int, int>> levelList)
 void transmitwindow::on_rbPathwaySecure_toggled(bool checked)
 {
     ui->gbPathwaySecurePassword->setVisible(checked);
+    updateSyncControls();
 }
 
 void transmitwindow::on_sbMinFPS_editingFinished()
